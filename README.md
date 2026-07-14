@@ -68,4 +68,4 @@ Feel free to open issues or pull requests on the GitHub repository.
 
 ## License
 
-(Add your license here, e.g., MIT, Apache 2.0)
+GNU General Public License v3.0 (see LICENSE file)
