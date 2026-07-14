@@ -27,6 +27,10 @@ public class Config {
     @Setting("timeout")
     private int timeout = 300;
 
+    public Config() {
+        this.dataDir = null;
+    }
+
     public Config(Path dataDir) {
         this.dataDir = dataDir;
     }
@@ -49,14 +53,14 @@ public class Config {
 
      // returns whether or not config was successfully loaded and not created.
     public boolean loadConfig() throws IOException {
-        Path configFile = this.dataDir.resolve("config.toml");
+        Path configFile = this.dataDir.resolve("config.conf");
 
         if (!Files.exists(this.dataDir)) {
             Files.createDirectories(this.dataDir);
         }
 
         if (!Files.exists(configFile)) {
-            InputStream in = getClass().getResourceAsStream("/config.toml");
+            InputStream in = getClass().getResourceAsStream("/config.conf");
             if (in != null) {
                 Files.copy(in, configFile);
             } else {
@@ -67,7 +71,16 @@ public class Config {
         
         HoconConfigurationLoader loader = HoconConfigurationLoader.builder().path(configFile).build();
         CommentedConfigurationNode rootNode = loader.load();
-        rootNode.get(Config.class, this);
+        
+        Config loadedData = rootNode.get(Config.class);
+
+        if (loadedData != null) {
+            this.startUrl = loadedData.getStartUrl();
+            this.shutdownUrl = loadedData.getShutdownUrl();
+            this.statusUrl = loadedData.getStatusUrl();
+            this.timeout = loadedData.getTimeout();
+            return true;
+        }
 
         return true;
     }

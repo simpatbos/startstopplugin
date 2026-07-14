@@ -20,6 +20,7 @@ public class Timer {
     }
 
     public synchronized void startTimer() {
+        if (isTiming()) return;
         shutdownTask = scheduler.schedule(this.task, this.timeoutInSeconds, TimeUnit.SECONDS);
     }
 
@@ -30,13 +31,13 @@ public class Timer {
     }
 
     public synchronized boolean isTiming() {
-        if (this.shutdownTask == null) {
-            return false;
-        }
-        return this.shutdownTask.isCancelled();
+        return this.shutdownTask != null 
+                && !this.shutdownTask.isCancelled() 
+                && !this.shutdownTask.isDone();
     }
 
     public synchronized long getTimeLeft() {
+        if (!isTiming()) return 0;
         return this.shutdownTask.getDelay(TimeUnit.SECONDS);
     }
 }

@@ -6,6 +6,7 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.*;
+import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerPing;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
@@ -17,6 +18,8 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 
 import java.nio.file.Path;
+import java.util.Optional;
+
 import org.slf4j.Logger;
 
 @Plugin(id = "startstop", name = "StartStop Plugin", version = "0.1.0", description = "Plugin to automatically start and stop server when players join and leave.", authors = {
@@ -28,15 +31,14 @@ public class JoinLeavePlugin {
     private final Config config;
     private final Timer timer;
     private final AWSManager awsManager;
-    private EC2ServerStatus currentServerStatus;
+    private EC2ServerStatus currentServerStatus = EC2ServerStatus.unknown;
+    private boolean isMCServerRunning = false;
 
     @Inject
     public JoinLeavePlugin(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
         this.server = server;
         this.logger = logger;
         this.config = new Config(dataDirectory);
-
-        this.currentServerStatus = EC2ServerStatus.unknown;
 
         try {
             boolean isConfigLoaded = this.config.loadConfig();
@@ -46,7 +48,7 @@ public class JoinLeavePlugin {
             }
         }
         catch (Exception e) {
-            logger.error("Error loading StartStop configuration.");
+            logger.error("Error loading StartStop configuration. " + e.getLocalizedMessage());
             System.exit(0);
         }
 
@@ -146,17 +148,11 @@ public class JoinLeavePlugin {
     @Subscribe
     public void onProxyPing(ProxyPingEvent event) {
         ServerPing pingData = event.getPing();
+        updateIsMCServerRunning();
 
         try {
             EC2ServerStatus status = this.awsManager.getEC2Status();
             this.currentServerStatus = status;
-
-            if (this.currentServerStatus == EC2ServerStatus.running 
-                && server.getPlayerCount() == 0
-                && !this.timer.isTiming()) 
-            {
-                this.timer.startTimer();
-            }
         }
         catch (Exception e) {
             this.logger.info("Failed to get server status. " + e.getLocalizedMessage());
@@ -192,6 +188,7 @@ public class JoinLeavePlugin {
         switch (this.currentServerStatus) {
             case running:
                 if (server.getPlayerCount() > 0) MOTD = running;
+                else if (!this.isMCServerRunning) MOTD = starting;
                 else MOTD = empty;
                 break;
             
@@ -216,5 +213,20 @@ public class JoinLeavePlugin {
                 .description(MOTD); // Set the MOTD
 
         event.setPing(mutatedPing.build());
+    }
+
+    private void updateIsMCServerRunning() {
+        Optional<RegisteredServer> tmpmain = this.server.getServer("main");
+        if (tmpmain.isPresent()) {
+            RegisteredServer main = tmpmain.get();
+            main.ping().thenAccept(pingResult -> {
+                this.isMCServerRunning = true;
+            })
+            .exceptionally(throwable -> {
+                this.isMCServerRunning = false;
+                return null;
+            });
+        }
+        else this.isMCServerRunning = false;
     }
 }
