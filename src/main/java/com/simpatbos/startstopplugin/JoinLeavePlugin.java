@@ -64,7 +64,7 @@ public class JoinLeavePlugin {
             this.timer.cancelTimer();
         }
 
-        if (server.getPlayerCount() == 0 && currentServerStatus != EC2ServerStatus.running) {
+        if (this.currentServerStatus != EC2ServerStatus.running && !this.isMCServerRunning) {
             try {
                 this.currentServerStatus = this.awsManager.startupEC2();
                 // start fresh timer to auto shut off if no one joins.
