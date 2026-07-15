@@ -8,6 +8,7 @@ import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.*;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerPing;
+import com.velocitypowered.api.scheduler.ScheduledTask;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.player.KickedFromServerEvent;
@@ -18,27 +19,43 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 
-@Plugin(id = "startstop", name = "StartStop Plugin", version = "0.1.0", description = "Plugin to automatically start and stop server when players join and leave.", authors = {
-        "Me" })
+@Plugin(id = "startstop",
+        name = "StartStop Plugin", 
+        version = "0.1.0", 
+        description = "Plugin to automatically start and stop server when players join and leave.", authors = {
+            "simpatbos"
+        })
 public class JoinLeavePlugin {
+
+    private record ShutdownTask(
+        ScheduledTask task,
+        Instant startTime) {
+    }
 
     private final ProxyServer server;
     private final Logger logger;
     private final Config config;
-    private final Timer timer;
     private final AWSManager awsManager;
+    private boolean debug = false;
     private EC2ServerStatus currentServerStatus = EC2ServerStatus.unknown;
     private boolean isMCServerRunning = false;
+    private ShutdownTask shutdownTask = null;
 
     @Inject
     public JoinLeavePlugin(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
         this.server = server;
         this.logger = logger;
         this.config = new Config(dataDirectory);
+
+        if (System.getProperty("debug") != null) this.debug = true;
+        if (this.debug) this.logger.warn("Debug mode: ON");
 
         try {
             boolean isConfigLoaded = this.config.loadConfig();
@@ -53,22 +70,27 @@ public class JoinLeavePlugin {
         }
 
         this.awsManager = new AWSManager(config.getStartUrl(), config.getShutdownUrl(), config.getStatusUrl());
-        this.timer = new Timer(this.config.getTimeout(), this.awsManager::shutdownEC2);
+
+        logDebug("Config settings:");
+        logDebug("start-url: " + config.getStartUrl());
+        logDebug("shutdown-url: " + config.getShutdownUrl());
+        logDebug("status-url: " + config.getStatusUrl());
+        logDebug("timeout: " + String.valueOf(config.getTimeout()));
     }
 
     @Subscribe
     public void onLogin(LoginEvent event) {
 
-        if (this.timer.isTiming()) {
-            this.logger.info("Player joined. Shutdown timer cancelled.");
-            this.timer.cancelTimer();
+        if (this.shutdownTask != null) {
+            this.logger.info("Shutdown cancelled.");
+            this.shutdownTask.task.cancel();
+            this.shutdownTask = null;
         }
 
         if (this.currentServerStatus != EC2ServerStatus.running && !this.isMCServerRunning) {
             try {
+                this.logger.info("Starting server.");
                 this.currentServerStatus = this.awsManager.startupEC2();
-                // start fresh timer to auto shut off if no one joins.
-                this.timer.startTimer();
             }
             catch (Exception e) {
                 this.logger.error("Error starting server.\n" + e.getLocalizedMessage());
@@ -78,14 +100,9 @@ public class JoinLeavePlugin {
 
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
-        if (this.server.getPlayerCount() == 0 && 
-            this.currentServerStatus != EC2ServerStatus.starting) {
-            try {
-                this.timer.startTimer();
-            }
-            catch(Exception e) {
-                this.logger.error("Error shutting down server.\n" + e.getLocalizedMessage());
-            }
+        if (this.server.getPlayerCount() == 0)
+        {
+            startShutdownTask();
         }
     }
 
@@ -167,7 +184,7 @@ public class JoinLeavePlugin {
 
         Component empty = MiniMessage.miniMessage().deserialize(
             "<gray>Status: <yellow><bold>Empty</bold> <gray>Ready to join!\n" +
-            this.timer.getTimeLeft() + " seconds until shutdown."
+            this.getTimeToShutdown() + " seconds until shutdown."
         );
 
         Component stopped = MiniMessage.miniMessage().deserialize(
@@ -230,5 +247,27 @@ public class JoinLeavePlugin {
             });
         }
         else this.isMCServerRunning = false;
+    }
+
+    private void startShutdownTask() {
+        this.shutdownTask = new ShutdownTask(this.server.getScheduler().buildTask(this, () -> {
+            try {
+                this.logger.info("Shutting down server.");
+                this.awsManager.shutdownEC2();
+            } catch (Exception e) {
+                this.logger.error("Error stopping EC2 server. " + e.getLocalizedMessage());
+            }
+        }).delay(this.config.getTimeout(), TimeUnit.SECONDS).schedule(), Instant.now());
+    }
+
+    private long getTimeToShutdown() {
+        if (this.shutdownTask == null) {
+            return -1;
+        }
+        return this.config.getTimeout() - Duration.between(this.shutdownTask.startTime, Instant.now()).getSeconds();
+    }
+
+    private void logDebug(String message) {
+        if (this.debug) this.logger.info("{DEBUG} " + message);
     }
 }

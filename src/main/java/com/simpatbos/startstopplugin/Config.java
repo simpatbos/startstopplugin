@@ -19,13 +19,13 @@ public class Config {
     private String startUrl = "<your-start-url>";
 
     @Setting("shutdown-url")
-    private String shutdownUrl = "<your-stop-url>";
+    private String shutdownUrl = "<your-shutdown-url>";
 
     @Setting("status-url")
     private String statusUrl = "<your-status-url>";
 
     @Setting("timeout")
-    private int timeout = 300;
+    private long timeout = 300;
 
     public Config() {
         this.dataDir = null;
@@ -47,7 +47,7 @@ public class Config {
         return statusUrl;
     }
 
-    public int getTimeout() {
+    public long getTimeout() {
         return timeout;
     }
 
